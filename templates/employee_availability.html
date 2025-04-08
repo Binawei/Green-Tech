@@ -1,0 +1,15 @@
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for employee in employees %}
+    <div class="p-4 border rounded {{ 'border-green-500' if employee.available else 'border-gray-300' }}">
+        <h3 class="text-lg font-bold">{{ employee.name }}</h3>
+        <p class="text-sm {{ 'text-green-500' if employee.available else 'text-gray-500' }}">
+            {% if employee.available %}
+                <span class="inline-block w-4 h-4 bg-green-500 rounded-full mr-2"></span> Available
+            {% else %}
+                <span class="inline-block w-4 h-4 bg-gray-300 rounded-full mr-2"></span> Unavailable
+            {% endif %}
+        </p>
+        <p class="text-sm">{{ 'Ready to address issues' if employee.available else 'Currently unavailable' }}</p>
+    </div>
+    {% endfor %}
+</div>

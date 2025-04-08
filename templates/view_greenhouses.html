@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}All Greenhouses{% endblock %}
+
+{% block content %}
+<div class="page-header mb-4" style="display: flex; justify-content: space-between; align-items: center;">
+    <h2 class="text-2xl font-semibold">All Greenhouses</h2>
+    {# --- Add New Greenhouse Button --- #}
+    {# Optional: Add permission check if needed #}
+     {% if g.employee.is_admin %}
+    <a href="{{ url_for('create_greenhouse') }}" class="btn btn-info btn-xs">
+                         New Greenhouse
+                    </a>
+     {% endif %}
+    {# --- End Button --- #}
+</div>
+
+
+{# Flash messages handled in base.html #}
+
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Location</th>
+                <th>Status</th>
+                {# Add more columns later if needed: Employee Count, Issues #}
+                <th class="actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for gh in greenhouses %}
+            <tr>
+                <td>{{ gh.id }}</td>
+                <td>{{ gh.name }}</td>
+                <td>{{ gh.location }}</td>
+                <td>
+                    {# Style status maybe? #}
+                    <span class="status-{{ gh.status.lower().replace(' ', '-') }}">{{ gh.status }}</span>
+                </td>
+                <td class="actions">
+                    {# Example actions - Add Edit/Delete later #}
+                    <a href="{{ url_for('input_form', greenhouse_id=gh.id) }}" class="btn btn-info btn-xs" title="Input Data">
+                        Input Data
+                    </a>
+                    {# <a href="#" class="btn btn-secondary btn-xs">Edit</a> #}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" style="text-align: center;" class="p-4">
+                    No greenhouses found. <a href="{{ url_for('create_greenhouse') }}">Create one?</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{# Add basic styles if needed #}
+<style>
+    /* Ensure btn-xs and btn-info styles exist */
+    .btn-xs {
+        padding: 0.15rem 0.4rem !important;
+        font-size: 0.7rem !important;
+        line-height: 1.4; /* Adjust line height */
+    }
+    .btn-info {
+        color: #fff;
+        background-color: #17a2b8;
+        border-color: #17a2b8;
+    }
+    .btn-info:hover {
+         background-color: #138496;
+         border-color: #117a8b;
+    }
+     /* Example status styling */
+     .status-operational { color: #16a34a; font-weight: 500; }
+     .status-needs-maintenance { color: #d97706; font-weight: 500; }
+     .status-offline { color: #dc2626; font-weight: 500; }
+</style>
+
+{% endblock %}

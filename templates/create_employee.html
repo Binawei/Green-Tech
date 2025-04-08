@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Create New Employee{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-semibold mb-6">Create New Employee</h2>
+
+
+<form method="post" action="{{ url_for('create_employee') }}">
+
+    <div class="form-group">
+        <label for="name" class="form-label">Full Name</label>
+        <input type="text" id="name" name="name" class="form-control" required>
+    </div>
+
+    <div class="form-group">
+        <label for="email" class="form-label">Email Address</label>
+        <input type="email" id="email" name="email" class="form-control" required>
+    </div>
+
+
+    <div class="form-group">
+        <label for="greenhouse_id" class="form-label">Assign to Greenhouse (Optional)</label>
+        <select id="greenhouse_id" name="greenhouse_id" class="form-control">
+             <option value="" selected>-- Unassigned --</option> {# Default to unassigned #}
+            {% for greenhouse in greenhouses %}
+            <option value="{{ greenhouse.id }}">{{ greenhouse.name }} ({{ greenhouse.location }})</option>
+            {% endfor %}
+        </select>
+         <small style="display: block; color: #6c757d; margin-top: 4px;">You can assign a greenhouse later if needed.</small>
+    </div>
+
+    {# --- Admin Checkbox --- #}
+    {# Only show Admin toggle if the logged-in user creating this employee is an admin #}
+    {% if current_user_is_admin %}
+    <div class="form-group">
+         <label class="form-check"> {# Wrap input and label text #}
+            <input type="checkbox" class="form-check-input" id="is_admin" name="is_admin">
+            <span class="form-check-label">Make this user an Administrator</span>
+        </label>
+        <small style="display: block; color: #6c757d; margin-top: 4px;">Administrators have full access, including creating/modifying other users and greenhouses.</small>
+    </div>
+    {% endif %}
+    {# --- End Admin Checkbox --- #}
+
+
+     <div class="form-actions">
+         {# Link back to the employee list page #}
+         <a href="{{ url_for('view_employees') }}" class="btn btn-secondary">
+             Cancel
+         </a>
+        <button type="submit" class="btn btn-primary">Create Employee</button>
+    </div>
+</form>
+{% endblock %}

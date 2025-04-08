@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-semibold mb-6">{{ title }}</h2>
+
+
+<div class="table-container">
+    <table class="data-table historical-data-table">
+        <thead>
+            <tr>
+                {# Show Greenhouse column only if NOT filtered (i.e., for Admin) #}
+                {% if not is_filtered %}
+                    <th scope="col">Greenhouse</th>
+                {% endif %}
+                <th scope="col">Temp (°C)</th>
+                <th scope="col">Humidity (%)</th>
+                <th scope="col">CO2 (ppm)</th>
+                <th scope="col">Light (lux)</th>
+                <th scope="col">Soil pH</th>
+                <th scope="col">Soil Moisture (%)</th>
+                <th scope="col">Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in data %}
+            <tr>
+                {# Show Greenhouse column only if NOT filtered #}
+                {% if not is_filtered %}
+                    <td>{{ entry.greenhouse.name if entry.greenhouse else entry.greenhouse_id }}</td>
+                {% endif %}
+                <td>{{ '%.2f'|format(entry.temperature) }}</td>
+                <td>{{ '%.1f'|format(entry.humidity) }}</td>
+                <td>{{ '%.1f'|format(entry.co2) }}</td>
+                <td>{{ '%.0f'|format(entry.light_intensity) }}</td>
+                <td>{{ '%.2f'|format(entry.soil_ph) }}</td>
+                <td>{{ '%.1f'|format(entry.soil_moisture) }}</td>
+                <td>{{ entry.timestamp.strftime('%Y-%m-%d %H:%M:%S') if entry.timestamp else 'N/A' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+
+                <td colspan="{{ 8 if not is_filtered else 7 }}" class="no-data-row">
+                    {% if is_filtered %}
+                        No manually entered environmental data found for your assigned greenhouse.
+                    {% else %}
+                         No manually entered environmental data found in the system.
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{# --- Pagination Controls --- #}
+{% if pagination and pagination.pages > 1 %}
+<nav aria-label="Page navigation" class="pagination-nav">
+    <ul class="pagination">
+
+        <li class="page-item {{ 'disabled' if not pagination.has_prev else '' }}">
+            <a class="page-link" href="{{ url_for('historical_data', page=pagination.prev_num) if pagination.has_prev else '#' }}" aria-label="Previous">
+                <span aria-hidden="true">«</span>
+            </a>
+        </li>
+
+
+        {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+            {% if page_num %}
+                <li class="page-item {{ 'active' if page_num == pagination.page else '' }}">
+                    <a class="page-link" href="{{ url_for('historical_data', page=page_num) }}">{{ page_num }}</a>
+                </li>
+            {% else %}
+                <li class="page-item disabled"><span class="page-link">...</span></li>
+            {% endif %}
+        {% endfor %}
+
+        <li class="page-item {{ 'disabled' if not pagination.has_next else '' }}">
+            <a class="page-link" href="{{ url_for('historical_data', page=pagination.next_num) if pagination.has_next else '#' }}" aria-label="Next">
+                <span aria-hidden="true">»</span>
+            </a>
+        </li>
+    </ul>
+     <div class="pagination-info">
+        Page {{ pagination.page }} of {{ pagination.pages }} ({{ pagination.total }} total records{% if is_filtered %} for this greenhouse{% endif %})
+    </div>
+</nav>
+{% elif data %}
+ <div class="pagination-info single-page">
+     ({{ pagination.total if pagination else data|length }} total records{% if is_filtered %} for this greenhouse{% endif %})
+ </div>
+{% endif %}
+
+<style>
+    .table-container {
+        overflow-x: auto;
+        border: 1px solid #a7f3d0;
+        border-radius: 6px;
+        background-color: #ffffff;
+        box-shadow: 0 1px 3px rgba(0, 128, 0, 0.1);
+    }
+
+    .data-table.historical-data-table {
+        width: 100%;
+        border-collapse: collapse; /* Remove space between borders */
+        font-size: 0.9rem;
+    }
+
+    .data-table.historical-data-table thead {
+        background-color: #e6fffa;
+        color: #047857;
+        border-bottom: 2px solid #a7f3d0;
+    }
+
+    .data-table.historical-data-table th {
+        padding: 10px 12px;
+        text-align: left;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .data-table.historical-data-table tbody tr {
+        border-bottom: 1px solid #d1fae5;
+        transition: background-color 0.15s ease-in-out;
+    }
+
+    .data-table.historical-data-table tbody tr:last-child {
+        border-bottom: none;
+    }
+
+    .data-table.historical-data-table tbody td {
+        padding: 9px 12px;
+        color: #374151;
+        vertical-align: middle;
+    }
+
+    /* --- Hover Effect --- */
+    .data-table.historical-data-table tbody tr:hover {
+        background-color: #f0fdf4;
+    }
+
+    .no-data-row td {
+        text-align: center;
+        padding: 20px;
+        color: #6b7280;
+        font-style: italic;
+    }
+
+        .pagination-nav {
+        margin-top: 25px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .pagination {
+        display: inline-flex;
+        padding-left: 0;
+        list-style: none;
+        border-radius: 0.25rem;
+        margin-bottom: 0;
+    }
+
+    .page-item {
+       margin: 0 2px;
+    }
+
+    .page-item.disabled .page-link {
+        color: #6c757d;
+        pointer-events: none;
+        background-color: #fff;
+        border-color: #dee2e6;
+    }
+
+    .page-item.active .page-link {
+        z-index: 3;
+        color: #fff;
+        background-color: #198754;
+        border-color: #198754;
+    }
+
+    .page-link {
+        position: relative;
+        display: block;
+        padding: 0.375rem 0.75rem;
+        color: #198754;
+        text-decoration: none;
+        background-color: #fff;
+        border: 1px solid #dee2e6;
+        transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+    }
+    .page-link:hover {
+        z-index: 2;
+        color: #105c38;
+        background-color: #e9ecef;
+        border-color: #dee2e6;
+    }
+    .page-item:first-child .page-link {
+        border-top-left-radius: 0.25rem;
+        border-bottom-left-radius: 0.25rem;
+    }
+    .page-item:last-child .page-link {
+        border-top-right-radius: 0.25rem;
+        border-bottom-right-radius: 0.25rem;
+    }
+
+     .pagination-info {
+        font-size: 0.85em;
+        color: #6c757d;
+        padding-top: 5px;
+    }
+     .pagination-info.single-page {
+         margin-top: 15px;
+         width: 100%;
+         text-align: center;
+     }
+
+</style>
+
+{% endblock %}

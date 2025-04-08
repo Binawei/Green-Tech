@@ -1,0 +1,20 @@
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for issue in issues %}
+    <div class="p-4 border rounded {{ 'border-green-500' if issue.status == 'resolved' else 'border-red-500' }}">
+        <h3 class="text-lg font-bold">Issue #{{ issue.id }}</h3>
+        <p class="text-sm {{ 'text-green-500' if issue.status == 'resolved' else 'text-red-500' }}">
+            {% if issue.status == 'resolved' %}
+                <span class="inline-block w-4 h-4 bg-green-500 rounded-full mr-2"></span> Resolved
+            {% else %}
+                <span class="inline-block w-4 h-4 bg-red-500 rounded-full mr-2"></span> Ongoing
+            {% endif %}
+        </p>
+        <p class="text-sm">{{ issue.description }}</p>
+        {% if issue.status == 'ongoing' %}
+        <form action="{{ url_for('resolve_issue', issue_id=issue.id) }}" method="post">
+            <button type="submit" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded">Mark as Resolved</button>
+        </form>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}All Issues{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-semibold mb-4">All System Issues</h2>
+
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Greenhouse</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Resolved</th>
+                <th class="actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr class="{{ 'resolved-row' if issue.status == 'Resolved' else 'ongoing-row' }}"> {# Add class for potential styling #}
+                <td>{{ issue.id }}</td>
+                <td>
+                    {% if issue.originating_greenhouse %}
+                        {{ issue.originating_greenhouse.name }}
+                        <span class="text-xs text-gray-500">({{ issue.originating_greenhouse.location }})</span>
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+                {# Use a smaller font or tooltip for long descriptions if needed #}
+                <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ issue.description }}">
+                    {{ issue.description }}
+                </td>
+                <td>
+                    {% if issue.status == 'Resolved' %}
+                        <span class="badge badge-success">Resolved</span>
+                    {% else %}
+                         <span class="badge badge-danger">Ongoing</span>
+                    {% endif %}
+                </td>
+                {# Format dates nicely #}
+                <td>{{ issue.created_at.strftime('%Y-%m-%d %H:%M') if issue.created_at else 'N/A' }}</td>
+                <td>{{ issue.resolved_at.strftime('%Y-%m-%d %H:%M') if issue.resolved_at else 'N/A' }}</td>
+
+                <td class="actions">
+                    {# Show resolve button only for 'Ongoing' issues #}
+                    {% if issue.status == 'Ongoing' %}
+                        {# --- Permission Check (Same logic as resolve route) --- #}
+                        {% set can_resolve_ui = (g.employee.is_admin or (issue.originating_greenhouse and g.employee.assigned_greenhouse and issue.originating_greenhouse.id == g.employee.assigned_greenhouse.id)) %}
+                        {% if can_resolve_ui %}
+                            <form action="{{ url_for('resolve_issue', issue_id=issue.id) }}" method="post" style="display: inline;">
+                                <button type="submit" class="btn btn-primary btn-sm" title="Mark as Resolved">
+                                    Resolve
+                                </button>
+                                {# You could use an icon instead of text if preferred #}
+                                {# <button type="submit" class="btn btn-success btn-sm" title="Mark as Resolved">
+                                     <svg ... checkmark icon ... ></svg>
+                                   </button> #}
+                            </form>
+                        {% else %}
+                             {# Optionally show a disabled button or nothing #}
+                             <span class="text-xs text-gray-400">No Action</span>
+                        {% endif %}
+                        {# --- End Permission Check --- #}
+                    {% else %}
+                         {# No action needed for resolved issues #}
+                         <span class="text-xs text-gray-400">Resolved</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7" style="text-align: center;" class="p-4">
+                    No issues found in the system.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{# Optional styling for resolved rows if desired #}
+<style>
+    .resolved-row td {
+        /* Example: slightly grayed out text for resolved items */
+        /* color: #6c757d; */
+    }
+    .resolved-row .badge {
+         opacity: 0.8; /* Example: make resolved badge slightly faded */
+    }
+    /* Ensure table action buttons are aligned nicely */
+    .data-table td.actions {
+        text-align: center;
+        white-space: nowrap; /* Prevent button text wrapping */
+    }
+     .text-xs { font-size: 0.75rem; }
+     .text-gray-500 { color: #6b7280; }
+     .text-gray-400 { color: #9ca3af; }
+     .btn-sm {
+          padding: 0.25rem 0.5rem !important;
+          font-size: 0.75rem !important;
+      }
+</style>
+
+{% endblock %}

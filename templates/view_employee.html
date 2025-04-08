@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}View Employees{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-semibold mb-4">All Employees</h2>
+
+{# Flash messages are now handled in base.html #}
+    <div class="page-header mb-4" style="display: flex; justify-content: space-between; align-items: center;">
+    {# --- Add New Employee Button --- #}
+    {% if g.employee and g.employee.is_admin %}
+        <a href="{{ url_for('create_employee') }}" class="btn btn-primary">
+                         New Employee
+                    </a>
+    {% endif %}
+     {# --- End Button --- #}
+</div>
+
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Available</th>
+                <th>Greenhouse</th> {# Column header is fine #}
+                <th>Location</th>   {# Column header is fine #}
+                <th>Company ID</th>
+                <th class="actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for employee in employees %}
+            <tr>
+                <td>{{ employee.id }}</td>
+                <td>{{ employee.name }}</td>
+                <td>{{ employee.email }}</td>
+                <td>
+                    {% if employee.available %}
+                        <span class="badge badge-success">Yes</span>
+                    {% else %}
+                         <span class="badge badge-danger">No</span>
+                    {% endif %}
+                </td>
+                {# Use the correct backref attribute name here #}
+                <td>{{ employee.assigned_greenhouse.name if employee.assigned_greenhouse else 'N/A' }}</td>
+                <td>{{ employee.assigned_greenhouse.location if employee.assigned_greenhouse else 'N/A' }}</td>
+                <td>{{ employee.company_id }}</td>
+                <td class="actions">
+                    <button type="button" class="action-button"
+                            data-employee-id="{{ employee.id }}">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="20" height="20">
+                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                        </svg>
+                    </button>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="8" style="text-align: center;" class="p-4">
+                    No employees found. <a href="{{ url_for('create_employee') }}">Create one?</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Action Modal Structure -->
+<div id="actionModal" class="modal" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="modal-content" role="document">
+        <div class="modal-header">
+             <h3 class="modal-title" id="modal-title">Employee Actions</h3>
+             <button type="button" id="closeModalButton" class="modal-close-btn" aria-label="Close">×</button>
+        </div>
+
+        <div id="modal-actions" class="modal-body modal-actions">
+             <p class="text-sm mb-3" style="color: #6c757d;">Select an action for the employee:</p>
+             <div >
+                <button id="viewAction" class="btn-link">
+                    View Details
+                </button>
+
+                <a id="editAction" href="#" class="btn-link">
+                    Edit Details
+                </a>
+            </div>
+        </div>
+
+        <div id="view-details-content" class="modal-body" style="display: none;">
+            {/* Content loaded via JS */}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+{# The JavaScript logic remains mostly the same, just adjust class names/styles if needed #}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const modal = document.getElementById('actionModal');
+    const closeModalButton = document.getElementById('closeModalButton');
+    const actionButtons = document.querySelectorAll('.action-button');
+    const viewActionButton = document.getElementById('viewAction');
+    const editActionButton = document.getElementById('editAction');
+    const viewDetailsContent = document.getElementById('view-details-content');
+    const modalActionsDiv = document.getElementById('modal-actions');
+
+    let currentEmployeeId = null;
+
+    // --- Function to Show Modal ---
+    function showModal(employeeId) {
+        currentEmployeeId = employeeId;
+        // Reset view details area and hide it
+        viewDetailsContent.innerHTML = '';
+        viewDetailsContent.style.display = 'none';
+        // Show action buttons area
+        modalActionsDiv.style.display = 'block';
+
+        // Set the href for the Edit link
+        editActionButton.href = `/employee/edit/${employeeId}`;
+
+        // Show the modal using the CSS class
+        modal.classList.add('is-visible');
+        // Or using style: modal.style.display = 'flex';
+    }
+
+    // --- Function to Hide Modal ---
+    function hideModal() {
+        modal.classList.remove('is-visible');
+         // Or using style: modal.style.display = 'none';
+        currentEmployeeId = null;
+    }
+
+    // --- Event Listeners ---
+    actionButtons.forEach(button => {
+        button.addEventListener('click', function(event) {
+            event.stopPropagation();
+            const employeeId = this.dataset.employeeId;
+            showModal(employeeId);
+        });
+    });
+
+    closeModalButton.addEventListener('click', hideModal);
+
+    // Close modal if clicking the background overlay
+    modal.addEventListener('click', function(event) {
+        // Check if the click was directly on the modal background itself
+        if (event.target === modal) {
+            hideModal();
+        }
+    });
+
+    // --- View Action Button Click ---
+    viewActionButton.addEventListener('click', function() {
+        if (!currentEmployeeId) return;
+
+        // Hide action buttons, show loading state in view details area
+        modalActionsDiv.style.display = 'none';
+        viewDetailsContent.innerHTML = '<p style="text-align: center; color: #6c757d;">Loading...</p>';
+        viewDetailsContent.style.display = 'block'; // Show the view area
+
+        fetch(`/api/employee/${currentEmployeeId}`)
+            .then(response => {
+                if (!response.ok) {
+                    // Try to get error message from JSON response if possible
+                    return response.json().then(err => { throw new Error(err.error || `HTTP error! status: ${response.status}`) });
+                }
+                return response.json();
+            })
+            .then(data => {
+
+                let detailsHtml = `
+                    <h4 class="modal-title">Employee Details</h4> {# Re-use modal title style #}
+                    <dl>
+                        <dt>Name:</dt>
+                        <dd>${data.name || 'N/A'}</dd>
+
+                        <dt>Email:</dt>
+                        <dd>${data.email || 'N/A'}</dd>
+
+                        <dt>Company ID:</dt>
+                        <dd>${data.company_id || 'N/A'}</dd>
+
+                        <dt>Available:</dt>
+                        <dd>${data.available ? 'Yes' : 'No'}</dd>
+
+                        <dt>Greenhouse:</dt>
+                        <dd>${data.greenhouse ? data.greenhouse.name : 'N/A'}</dd>
+
+                        <dt>Location:</dt>
+                        <dd>${data.greenhouse ? data.greenhouse.location : 'N/A'}</dd>
+                    </dl>
+                `;
+                viewDetailsContent.innerHTML = detailsHtml;
+            })
+            .catch(error => {
+                console.error('Error fetching employee details:', error);
+                viewDetailsContent.innerHTML = `<p style="text-align: center; color: #dc3545;">Could not load details. ${error.message || ''}</p>`;
+            });
+    });
+
+     // Close modal on ESC key press
+    document.addEventListener('keydown', function (event) {
+        // Check if modal is visible before closing
+        if (event.key === 'Escape' && modal.classList.contains('is-visible')) {
+            hideModal();
+        }
+    });
+
+});
+</script>
+{% endblock %}

@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+
+{# --- Welcome Message --- #}
+{% if g.employee %}
+    <h1 class="text-2xl font-semibold mb-5">Welcome, {{ g.employee.name }}!</h1>
+{% endif %}
+{# --- End Welcome Message --- #}
+
+<h2 class="text-xl font-semibold mb-4">System Overview</h2>
+
+
+<div class="dashboard-grid">
+
+    <div class="dashboard-card">
+        <h3 class="text-lg font-medium mb-2">Greenhouse Status</h3>
+        {# Use the new data structure passed from the backend #}
+        {% if displayed_greenhouses_data %}
+            {% for gh_data in displayed_greenhouses_data %}
+                <div class="greenhouse-summary-box">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px;">
+                        <div>
+                            <strong style="font-size: 1.05em;">{{ gh_data.greenhouse.name }}</strong>
+                            <span class="text-xs text-gray-500">({{ gh_data.greenhouse.location }})</span>
+                        </div>
+                        <a href="{{ url_for('input_form', greenhouse_id=gh_data.greenhouse.id) }}" class="btn btn-info btn-xs">
+                             Input Data
+                        </a>
+                    </div>
+                    {# --- Clickable Status --- #}
+                    <p class="text-sm mb-1">
+                        Status:
+                        <span class="status-indicator status-{{ gh_data.status_class }}"
+                              onclick="showGreenhouseDataModal({{ gh_data.greenhouse.id }})"
+                              title="Click to view latest readings"
+                              style="cursor: pointer; text-decoration: underline;">
+                            {{ gh_data.status_text }}
+                        </span>
+                    </p>
+                    {# --- End Clickable Status --- #}
+
+                    {# Show ongoing issue count only if issues exist #}
+                    {% if gh_data.has_ongoing_issue %}
+                         {% set ongoing_count = gh_data.greenhouse.issues|selectattr('status', 'equalto', 'Ongoing')|list|length %}
+                         <p class="text-sm text-red-600">Ongoing Issues: {{ ongoing_count }}</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+                 <a href="{{ url_for('view_greenhouses') }}" class="btn btn-sm btn-secondary">View All Greenhouses</a>
+            </div>
+        {% else %}
+            <p>No greenhouses found.</p>
+            {% if g.employee and g.employee.is_admin %} {# Only admin sees add greenhouse button here #}
+             <a href="{{ url_for('create_greenhouse') }}" class="btn btn-sm btn-primary mt-3">Add Greenhouse</a>
+            {% endif %}
+        {% endif %}
+    </div>
+
+    {# --- Employee Card (Admin Only) --- #}
+    {% if g.employee and g.employee.is_admin %}
+    <div class="dashboard-card">
+        <h3 class="text-lg font-medium mb-2">Employees</h3>
+        <p>Total Employees: <strong>{{ employee_count }}</strong></p>
+        <a href="{{ url_for('view_employees') }}" class="btn btn-sm btn-secondary mt-3" style="margin-right: 5px;">View All</a>
+        <a href="{{ url_for('create_employee') }}" class="btn btn-sm btn-primary mt-3">Add Employee</a>
+    </div>
+    {% endif %}
+
+    {# --- Issues Card --- #}
+    <div class="dashboard-card">
+        <h3 class="text-lg font-medium mb-2">Issue Status</h3>
+        <p class="mb-2">Ongoing Issues: <strong style="color: #dc2626;">{{ ongoing_issue_count }}</strong></p>
+        <p class="mb-3">Resolved Issues: <strong style="color: #16a34a;">{{ resolved_issue_count }}</strong></p>
+        <a href="{{ url_for('view_all_issues') }}" class="btn btn-sm btn-secondary mt-3">View All Issues</a>
+    </div>
+
+</div> {# End .dashboard-grid #}
+
+
+    {% if assigned_greenhouse_issue %} {# Only render if there's an issue passed from backend #}
+<div id="issue-alert-modal" class="modal-backdrop"> {# Initially hidden via CSS #}
+    <div class="modal-content">
+        <div class="modal-header">
+            {# Use the eager-loaded greenhouse name #}
+            <h5 class="modal-title">🚨 Issue Alert: {{ assigned_greenhouse_issue.originating_greenhouse.name }}</h5>
+            {# Simple close button for now #}
+            <button type="button" class="modal-close-btn" onclick="closeIssueModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <p>An ongoing issue requires attention in your assigned greenhouse:</p>
+            {# Display the issue description safely #}
+            <pre class="issue-description">{{ assigned_greenhouse_issue.description }}</pre>
+             <p><small>Detected at: {{ assigned_greenhouse_issue.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</small></p>
+        </div>
+        <div class="modal-footer">
+             {# Link to the specific issue on the all_issues page #}
+             <a href="{{ url_for('view_all_issues') }}#issue-{{ assigned_greenhouse_issue.id }}" class="btn btn-sm btn-warning">View Details</a>
+             <button type="button" class="btn btn-sm btn-secondary" onclick="closeIssueModal()">Acknowledge</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+
+    <div id="greenhouse-data-modal" class="modal-backdrop">
+    <div class="modal-content data-modal-content">
+        <div class="modal-header">
+            {# Title will be set by JS #}
+            <h5 id="modal-gh-data-title" class="modal-title data-modal-title">Greenhouse Readings</h5>
+            <button type="button" class="modal-close-btn" onclick="closeModal('greenhouse-data-modal')">×</button>
+        </div>
+        <div class="modal-body">
+             {# Location will be set by JS #}
+             <p style="text-align: center; font-size: 0.9em; color: #6c757d; margin-top: -15px; margin-bottom: 15px;" id="modal-gh-data-location"></p>
+             {# Data list will be populated by JS #}
+             <div id="modal-gh-data-list">
+                <p>Loading data...</p>
+             </div>
+             {# Timestamp will be set by JS #}
+             <p style="text-align: right; font-size: 0.8em; color: #6c757d; margin-top: 15px;" id="modal-gh-data-timestamp"></p>
+        </div>
+        <div class="modal-footer">
+             <button type="button" class="btn btn-sm btn-secondary" onclick="closeModal('greenhouse-data-modal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .status-indicator {
+        font-weight: 500;
+         cursor: pointer;
+        text-decoration: underline;
+    }
+    .status-normal { color: #16a34a;  }
+    .status-issue-detected { color: #dc2626;  }
+    /* Add other status colors if needed */
+    .status-needs-maintenance { color: #d97706;  }
+    .status-offline { color: #6c757d;  }
+
+
+    .data-modal-content {
+        max-width: 480px;
+         border-top: 5px solid #17a2b8;
+    }
+    .data-modal-title {
+        color: #343a40;
+        text-align: center;
+        width: 100%;
+        margin-left: 25px;
+        padding-right: 25px;
+    }
+    #modal-gh-data-list ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    #modal-gh-data-list li {
+        border-bottom: 1px solid #eee;
+        padding: 8px 5px;
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.95em;
+    }
+     #modal-gh-data-list li:last-child {
+         border-bottom: none;
+     }
+     #modal-gh-data-list li strong {
+         color: #495057;
+     }
+     #modal-gh-data-list .no-data {
+         text-align: center;
+         color: #6c757d;
+         padding: 20px;
+     }
+     /* Style for out-of-range values (optional) */
+     #modal-gh-data-list .out-of-range {
+         color: #dc3545;
+         font-weight: bold;
+     }
+     #modal-gh-data-list .in-range {
+          color: #16a34a;
+     }
+
+    .modal-backdrop {
+        display: none;
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        background-color: rgba(0, 0, 0, 0.6); /* Darker backdrop */
+        z-index: 1060; /* High z-index */
+        justify-content: center;
+        align-items: center;
+        padding: 20px; /* Padding for smaller screens */
+    }
+    /* Class added by JS to show the modal */
+    .modal-backdrop.active {
+        display: flex;
+    }
+    .modal-content {
+        background-color: #fff;
+        padding: 25px 30px;
+        border-radius: 8px;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+        min-width: 320px;
+        max-width: 550px; /* Adjust as needed */
+        width: auto; /* Allow shrinking */
+        position: relative;
+         border-top: 5px solid #dc3545; /* Red top border for alert */
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #dee2e6;
+        padding-bottom: 12px;
+        margin-bottom: 18px;
+    }
+    .modal-title {
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: #dc3545; /* Match border color */
+        margin: 0;
+    }
+    .modal-close-btn {
+        background: none; border: none; font-size: 1.9rem; line-height: 1;
+        color: #6c757d; cursor: pointer; padding: 0 5px; opacity: 0.7;
+        position: absolute; /* Position top right */
+        top: 10px;
+        right: 15px;
+    }
+    .modal-close-btn:hover { opacity: 1; }
+
+    .modal-body { margin-bottom: 20px; color: #495057; }
+     .modal-body p { margin-bottom: 8px; }
+     .modal-body p:first-child { font-weight: 500; } /* Slightly bolder intro text */
+     .modal-body small { color: #6c757d; font-size: 0.85em; }
+
+    .modal-body .issue-description {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        padding: 12px;
+        border-radius: 4px;
+        white-space: pre-wrap; /* Wrap long lines */
+        word-wrap: break-word;
+        max-height: 250px; /* Limit height */
+        overflow-y: auto; /* Add scroll if needed */
+        font-size: 0.9em;
+        margin-top: 10px;
+        color: #343a40;
+    }
+    .modal-footer {
+        border-top: 1px solid #eee;
+        padding-top: 15px;
+        text-align: right;
+    }
+    .modal-footer .btn { margin-left: 10px; }
+
+    /* Ensure button styles are available/defined */
+    .btn-warning { color: #212529; background-color: #ffc107; border-color: #ffc107; }
+    .btn-warning:hover { background-color: #e0a800; border-color: #d39e00; }
+    .btn-secondary { color: #fff; background-color: #6c757d; border-color: #6c757d; }
+    .btn-secondary:hover { background-color: #5a6268; border-color: #545b62; }
+
+    .greenhouse-summary-box {
+        border: 1px solid #a7f3d0; /* Light green border */
+        padding: 10px 12px;
+        margin-bottom: 12px;
+        border-radius: 4px;
+        background-color: #f0fdf4; /* Very light green background */
+    }
+    .greenhouse-summary-box:last-child {
+        margin-bottom: 0;
+    }
+
+    /* Ensure button styles are defined */
+    .btn-xs {
+        padding: 0.15rem 0.4rem !important;
+        font-size: 0.7rem !important;
+        line-height: 1.4;
+    }
+    .btn-info {
+        color: #fff;
+        background-color: #17a2b8;
+        border-color: #17a2b8;
+    }
+    .btn-info:hover {
+         background-color: #138496;
+         border-color: #117a8b;
+    }
+    .text-xs { font-size: 0.75rem; }
+    .text-gray-500 { color: #6b7280; }
+    .text-red-600 { color: #dc2626; }
+    .mb-1 { margin-bottom: 0.25rem; }
+    .status-operational { color: #16a34a; font-weight: 500; }
+    .status-needs-maintenance { color: #d97706; font-weight: 500; }
+    .status-offline { color: #dc2626; font-weight: 500; }
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* Responsive grid */
+        gap: 20px;
+        margin-top: 20px;
+    }
+    .dashboard-card {
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 5px;
+        border: 1px solid #e9ecef;
+    }
+    .dashboard-card h3 {
+        border-bottom: 1px solid #eee;
+        padding-bottom: 8px;
+        margin-bottom: 15px;
+    }
+     .dashboard-card ul {
+         list-style: disc;
+         padding-left: 20px;
+         font-size: 0.9em;
+         color: #495057;
+     }
+      .dashboard-card li {
+          margin-bottom: 5px;
+      }
+       .dashboard-card p { /* Style for the count paragraphs */
+          font-size: 0.95em;
+          color: #495057;
+       }
+       .dashboard-card p strong {
+            font-weight: 600; /* Make counts bold */
+            font-size: 1.1em; /* Slightly larger */
+       }
+      .mt-3 { margin-top: 1rem; }
+      .mb-2 { margin-bottom: 0.5rem; }
+      .mb-3 { margin-bottom: 0.75rem; }
+      .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            border-radius: 0.2rem;
+       }
+       /* Ensure secondary button style exists */
+       .btn-secondary {
+           color: #343a40;
+           background-color: #e9ecef;
+           border-color: #ced4da;
+       }
+       .btn-secondary:hover {
+           background-color: #ced4da;
+       }
+</style>
+{# --- End Style Block --- #}
+{% block scripts %}
+{{ super() }} {# Include scripts from base template if any #}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const modal = document.getElementById('issue-alert-modal');
+        // Check if the modal element exists in the DOM (rendered by Jinja)
+        if (modal) {
+            modal.classList.add('active'); // Make the modal visible
+        }
+    });
+
+    function closeIssueModal() {
+        const modal = document.getElementById('issue-alert-modal');
+        if (modal) {
+            modal.classList.remove('active'); // Hide the modal
+            // Note: This just hides it for the current view.
+            // It will reappear on next refresh if the issue is still 'Ongoing'.
+            // It will NOT appear on next refresh if the issue has been 'Resolved'.
+        }
+    }
+
+    // Optional: Close modal if clicking on the backdrop (outside the content)
+    const modalBackdrop = document.getElementById('issue-alert-modal');
+    if (modalBackdrop) {
+        modalBackdrop.addEventListener('click', function(event) {
+            // Check if the click target is the backdrop itself
+            if (event.target === modalBackdrop) {
+                closeIssueModal();
+            }
+        });
+    }
+</script>
+
+    <script>
+    function showGreenhouseDataModal(greenhouseId) {
+        const modalId = 'greenhouse-data-modal';
+        const titleElement = document.getElementById('modal-gh-data-title');
+        const locationElement = document.getElementById('modal-gh-data-location');
+        const listElement = document.getElementById('modal-gh-data-list');
+        const timestampElement = document.getElementById('modal-gh-data-timestamp');
+
+        // Reset modal content while loading
+        titleElement.textContent = 'Loading Greenhouse Data...';
+        locationElement.textContent = '';
+        listElement.innerHTML = '<p style="text-align:center; padding: 15px;">Loading...</p>';
+        timestampElement.textContent = '';
+
+        openModal(modalId);
+
+        // Fetch data from the API
+        fetch(`/api/greenhouse/${greenhouseId}/latest_data`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(result => {
+                if (result.success) {
+                    titleElement.textContent = `${result.greenhouse_name}`; // Set title
+                    locationElement.textContent = `Location: ${result.location}`;
+
+                    if (result.data) {
+                        // Build the list of readings
+                        let dataHtml = '<ul>';
+                        dataHtml += `<li><strong>Temperature:</strong> <span class="${isTempOk(result.data.temperature) ? 'in-range' : 'out-of-range'}">${result.data.temperature.toFixed(2)} °C</span></li>`;
+                        dataHtml += `<li><strong>Humidity:</strong> <span class="${isHumidityOk(result.data.humidity) ? 'in-range' : 'out-of-range'}">${result.data.humidity.toFixed(2)} %</span></li>`;
+                        dataHtml += `<li><strong>CO₂ Level:</strong> <span class="${isCo2Ok(result.data.co2) ? 'in-range' : 'out-of-range'}">${result.data.co2.toFixed(2)} ppm</span></li>`;
+                        dataHtml += `<li><strong>Light Intensity:</strong> <span class="${isLightOk(result.data.light_intensity) ? 'in-range' : 'out-of-range'}">${result.data.light_intensity.toFixed(2)} lux</span></li>`;
+                        dataHtml += `<li><strong>Soil pH:</strong> <span class="${isPhOk(result.data.soil_ph) ? 'in-range' : 'out-of-range'}">${result.data.soil_ph.toFixed(2)}</span></li>`;
+                        dataHtml += `<li><strong>Soil Moisture:</strong> <span class="${isMoistureOk(result.data.soil_moisture) ? 'in-range' : 'out-of-range'}">${result.data.soil_moisture.toFixed(2)} %</span></li>`;
+                        dataHtml += '</ul>';
+                        listElement.innerHTML = dataHtml;
+                        timestampElement.textContent = `Last reading: ${result.data.timestamp}`;
+                    } else {
+                        listElement.innerHTML = '<p class="no-data">No environmental data available for this greenhouse.</p>';
+                        timestampElement.textContent = '';
+                    }
+                } else {
+                    // Handle case where API reports success: false (optional)
+                    listElement.innerHTML = '<p class="no-data">Could not retrieve data.</p>';
+                    timestampElement.textContent = '';
+                     titleElement.textContent = 'Error';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching greenhouse data:', error);
+                titleElement.textContent = 'Error';
+                listElement.innerHTML = '<p class="no-data">Failed to load data. Please try again later.</p>';
+                timestampElement.textContent = '';
+            });
+    }
+
+    // These are used for styling values in the modal
+    function isTempOk(value) { return value >= 20 && value <= 25; }
+    function isHumidityOk(value) { return value >= 40 && value <= 60; }
+    function isCo2Ok(value) { return value >= 400 && value <= 1000; }
+    function isLightOk(value) { return value >= 1000 && value <= 10000; }
+    function isPhOk(value) { return value >= 6.0 && value <= 7.0; }
+    function isMoistureOk(value) { return value >= 30 && value <= 60; }
+
+
+    // Script for the assigned issue alert modal (as before)
+    document.addEventListener('DOMContentLoaded', function() {
+        const alertModal = document.getElementById('issue-alert-modal');
+        if (alertModal) {
+            // Only show alert modal if it exists (i.e., if assigned_greenhouse_issue is not None)
+            // Use the generic openModal function
+            openModal('issue-alert-modal');
+        }
+    });
+
+    // Renamed function to avoid conflict if you still have the old one
+    function closeAlertModal() { // Specific for the alert modal
+        closeModal('issue-alert-modal');
+    }
+
+    // Add backdrop listener specifically for alert modal if needed
+     const alertModalBackdrop = document.getElementById('issue-alert-modal');
+    if (alertModalBackdrop) {
+        alertModalBackdrop.addEventListener('click', function(event) {
+            if (event.target === alertModalBackdrop) {
+                closeAlertModal();
+            }
+        });
+    }
+
+</script>
+{% endblock %}
+
+{% endblock %}

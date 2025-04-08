@@ -1,0 +1,5 @@
+.env
+/.venv
+/.idea
+/migrations
+.DS_Store
