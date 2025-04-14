@@ -4,7 +4,6 @@ import string
 from functools import wraps
 import datetime
 import logging
-
 from flask_migrate import Migrate
 import click
 from flask import (Flask, render_template, request, redirect, url_for,
@@ -121,7 +120,6 @@ def dashboard():
         all_greenhouses_query = Greenhouse.query.options(
             selectinload(Greenhouse.issues),
         ).order_by(Greenhouse.id)
-
         all_greenhouses = all_greenhouses_query.all()
 
         greenhouse_display_data = []
@@ -144,31 +142,33 @@ def dashboard():
                 'latest_data': latest_data
             })
 
-
         def sort_key(gh_data):
             return (0 if gh_data['has_ongoing_issue'] else 1, gh_data['greenhouse'].id)
-
         sorted_greenhouses_data = sorted(greenhouse_display_data, key=sort_key)
-        displayed_greenhouses_data = sorted_greenhouses_data[:4] # Slice after sorting
-        # --- End Sorting ---
+        displayed_greenhouses_data = sorted_greenhouses_data[:4]
 
-        # --- Existing Counts ---
-        employee_count = Employee.query.count()
+        # --- Counts ---
+        employee_count = Employee.query.count() # Make sure Employee model is used
         ongoing_issue_count = sum(1 for gh_data in greenhouse_display_data if gh_data['has_ongoing_issue'])
         resolved_issue_count = db.session.query(func.count(Issue.id)).filter(Issue.status == 'Resolved').scalar() or 0
 
-        # --- Check for personal ongoing issue for alert modal ---
         assigned_greenhouse_issue = None
-        if g.employee and g.employee.greenhouse_id:
+        # Check if the employee is logged in AND is assigned to any greenhouses
+        if g.employee and g.employee.greenhouses:
+            # Get the list of IDs for the greenhouses the employee is assigned to
+            assigned_greenhouse_ids = [gh.id for gh in g.employee.greenhouses]
+
+            # Find the first ongoing issue in ANY of the assigned greenhouses
             assigned_greenhouse_issue = Issue.query.options(
                 joinedload(Issue.originating_greenhouse)
             ).filter(
-                Issue.greenhouse_id == g.employee.greenhouse_id,
+                Issue.greenhouse_id.in_(assigned_greenhouse_ids),
                 Issue.status == 'Ongoing'
             ).order_by(
                 Issue.created_at.desc()
             ).first()
 
+        # --- Render template (remains the same) ---
         return render_template('dashboard.html',
                                displayed_greenhouses_data=displayed_greenhouses_data,
                                ongoing_issue_count=ongoing_issue_count,
@@ -176,11 +176,14 @@ def dashboard():
                                employee_count=employee_count,
                                assigned_greenhouse_issue=assigned_greenhouse_issue)
 
+    except AttributeError as ae:
+        app.logger.error(f"Dashboard AttributeError: {ae}", exc_info=True)
+        flash("An error occurred processing employee data. Check model attributes.", "error")
+        return render_template('dashboard.html', displayed_greenhouses_data=[], ongoing_issue_count=0, resolved_issue_count=0, employee_count=0, assigned_greenhouse_issue=None)
     except Exception as e:
         app.logger.error(f"Dashboard error: {e}", exc_info=True)
         flash("An unexpected error occurred loading the dashboard.", "error")
         return render_template('dashboard.html', displayed_greenhouses_data=[], ongoing_issue_count=0, resolved_issue_count=0, employee_count=0, assigned_greenhouse_issue=None)
-
 
 
 @app.route('/issues')
@@ -525,65 +528,72 @@ def create_employee():
 
     greenhouses = Greenhouse.query.order_by(Greenhouse.name).all()
     form_data = {'name': '', 'email': '', 'phone_number': ''}
+    selected_gh_ids = []
 
     if request.method == 'POST':
         new_password = None
         form_data['name'] = request.form.get('name', '').strip()
         form_data['email'] = request.form.get('email', '').strip()
         form_data['phone_number'] = request.form.get('phone_number', '').strip()
+
         try:
-            greenhouse_id_str = request.form.get('greenhouse_id')
+            selected_gh_ids = request.form.getlist('greenhouse_ids')
             is_admin_form = 'is_admin' in request.form
 
-            # --- Validation ---
+            # --- Basic Validation ---
             if not form_data['name'] or not form_data['email']:
                 flash("Name and email are required.", "warning")
-                return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+                return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, selected_gh_ids=selected_gh_ids, **form_data)
+
+            # --- Check if email already exists using the Users model ---
             if Employee.query.filter_by(email=form_data['email']).first():
                  flash("An employee with this email already exists.", "error")
-                 return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+                 return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, selected_gh_ids=selected_gh_ids, **form_data)
 
-            greenhouse_id = None
-            if greenhouse_id_str and greenhouse_id_str.isdigit():
+            # --- Process Selected Greenhouses ---
+            selected_greenhouses = []
+            if selected_gh_ids:
                 try:
-                    potential_id = int(greenhouse_id_str)
-                    if Greenhouse.query.get(potential_id):
-                         greenhouse_id = potential_id
-                    else:
-                         flash("Selected greenhouse does not exist.", "error")
-                         return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+                    int_ids = [int(id_str) for id_str in selected_gh_ids if id_str.isdigit()]
+                    if int_ids:
+                        selected_greenhouses = Greenhouse.query.filter(Greenhouse.id.in_(int_ids)).all()
+
+                        if len(selected_greenhouses) != len(int_ids):
+                            found_ids = {gh.id for gh in selected_greenhouses}
+                            missing_ids = [i for i in int_ids if i not in found_ids]
+                            app.logger.warning(f"Create Employee: Submitted greenhouse IDs {int_ids}, but only found {found_ids}. Missing: {missing_ids}")
+
                 except ValueError:
-                     flash("Invalid greenhouse selection.", "error")
-                     return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+                     flash("Invalid format submitted for greenhouse IDs.", "error")
+                     return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, selected_gh_ids=selected_gh_ids, **form_data)
 
-            elif not greenhouse_id_str or not greenhouse_id_str.isdigit():
-                greenhouse_id = None
-
+            # --- Generate Password and Company ID ---
             new_password = generate_password()
             company_id = generate_unique_company_id()
 
-            # --- Prepare phone number for database ---
+            # --- Prepare phone number (allow null) ---
             phone_to_save = form_data['phone_number'] if form_data['phone_number'] else None
-            # ------------------------------------------
+
 
             new_employee = Employee(
                 name=form_data['name'],
                 email=form_data['email'],
                 phone_number=phone_to_save,
                 available=True,
-                greenhouse_id=greenhouse_id,
                 company_id=company_id,
                 is_admin=is_admin_form
             )
             new_employee.set_password(new_password)
+            new_employee.greenhouses = selected_greenhouses
 
             db.session.add(new_employee)
             db.session.commit()
-            # --- End Database Operations ---
 
-            log_message = f"CREATED Employee: Name='{form_data['name']}', Email='{form_data['email']}', Phone='{phone_to_save or 'N/A'}', CompanyID='{company_id}', Admin={is_admin_form}" # <-- Added Phone to log
+            assigned_ids_log = [gh.id for gh in selected_greenhouses]
+            log_message = (f"CREATED User: Name='{form_data['name']}', Email='{form_data['email']}', "
+                           f"Phone='{phone_to_save or 'N/A'}', CompanyID='{company_id}', Admin={is_admin_form}, "
+                           f"Assigned GH IDs: {assigned_ids_log}")
             app.logger.info(log_message)
-            print(f"!!! DEBUG ONLY - CREATED Employee: Name='{form_data['name']}', Email='{form_data['email']}', Phone='{phone_to_save or 'N/A'}', CompanyID='{company_id}', TempPassword='{new_password}', Admin={is_admin_form}")
 
 
             # --- Send Welcome Email ---
@@ -593,19 +603,20 @@ def create_employee():
 
             Welcome to the GreenTech Monitoring System!
             Your account has been created successfully.
-            
+
             You can log in using the following credentials:
             Email: {form_data['email']}
             Temporary Password: {new_password}
-            
+
             Please log in at {login_url}
-            
+
             We strongly recommend changing this password via your profile settings after your first login for security reasons.
-            
+
             Regards,
             The GreenTech Team
             """
 
+            # --- Email Sending Logic (keep as before) ---
             if app.config.get('MAIL_ENABLED'):
                 email_sent = send_email_notification(
                     subject=email_subject,
@@ -626,12 +637,18 @@ def create_employee():
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error creating employee: {e}", exc_info=True)
-            flash(f"An error occurred while creating the employee: {str(e)}", "error")
-            return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+            flash(f"An unexpected error occurred while creating the employee: {str(e)}", "error")
+            return render_template('create_employee.html',
+                                   greenhouses=greenhouses,
+                                   current_user_is_admin=g.employee.is_admin,
+                                   selected_gh_ids=selected_gh_ids,
+                                   **form_data)
 
-    return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
-
-
+    return render_template('create_employee.html',
+                           greenhouses=greenhouses,
+                           current_user_is_admin=g.employee.is_admin,
+                           selected_gh_ids=selected_gh_ids,
+                           **form_data)
 
 
 
@@ -639,16 +656,19 @@ def create_employee():
 @login_required
 def view_employees():
     try:
-        employees = Employee.query.options(db.joinedload(Employee.assigned_greenhouse)).order_by(Employee.name).all()
-        return render_template('view_employee.html', employees=employees)
-    except AttributeError as ae:
+        employees = Employee.query.options(
+            db.joinedload(Employee.greenhouses)
+        ).order_by(Employee.name).all()
 
+        return render_template('view_employee.html', employees=employees)
+
+    except AttributeError as ae:
         app.logger.error(f"View employees Attribute error: {ae}", exc_info=True)
-        flash("Error accessing employee relationship. Check model backref names.", "error")
+        flash("Error accessing employee data or relationships. Check model attributes.", "error")
         return render_template('view_employee.html', employees=[])
     except Exception as e:
-         if "exist" in str(e) or "relation" in str(e).lower():
-             flash("Database tables not found. Run 'flask init-db'.", "error")
+         if "exist" in str(e).lower() or "relation" in str(e).lower():
+             flash("Database tables might be missing or improperly configured. Run 'flask db upgrade'.", "error")
              return render_template('view_employee.html', employees=[])
          else:
              app.logger.error(f"View employees error: {e}", exc_info=True)
@@ -659,22 +679,34 @@ def view_employees():
 @app.route('/api/employee/<int:employee_id>')
 @login_required
 def api_employee_details(employee_id):
-    employee = Employee.query.options(db.joinedload(Employee.assigned_greenhouse)).get(employee_id)
+    # --- Fetch Employee and eagerly load the 'greenhouses' relationship ---
+    employee = Employee.query.options(
+        db.joinedload(Employee.greenhouses)
+    ).get(employee_id)
+
     if employee:
+        greenhouses_data = []
+        if employee.greenhouses:
+            for gh in employee.greenhouses:
+                greenhouses_data.append({
+                    'id': gh.id,
+                    'name': gh.name,
+                    'location': gh.location
+                })
+
+        # --- Return JSON data ---
         return jsonify({
             'id': employee.id,
             'name': employee.name,
             'email': employee.email,
+            'phone_number': employee.phone_number,
             'company_id': employee.company_id,
             'available': employee.available,
-            'is_admin': employee.is_admin, # Include admin status
-            'greenhouse': {
-                'id': employee.assigned_greenhouse.id,
-                'name': employee.assigned_greenhouse.name,
-                'location': employee.assigned_greenhouse.location
-            } if employee.assigned_greenhouse else None
+            'is_admin': employee.is_admin,
+            'greenhouses': greenhouses_data
         })
     else:
+        # Employee not found
         return jsonify({'error': 'Employee not found'}), 404
 
 
@@ -689,47 +721,75 @@ def generate_unique_company_id():
 @app.route('/employee/edit/<int:employee_id>', methods=['GET', 'POST'])
 @login_required
 def edit_employee(employee_id):
-
     employee_to_edit = Employee.query.get_or_404(employee_id)
+
     if not g.employee.is_admin and g.employee.id != employee_to_edit.id:
          flash("You do not have permission to edit this employee.", "error")
          return redirect(url_for('view_employees'))
 
+    # --- Fetch all greenhouses for the selection list ---
     greenhouses = Greenhouse.query.order_by(Greenhouse.name).all()
 
+    # --- Handle POST request (form submission) ---
     if request.method == 'POST':
         try:
-            employee_to_edit.name = request.form.get('name')
-            new_email = request.form.get('email')
+            employee_to_edit.name = request.form.get('name', '').strip()
+            new_email = request.form.get('email', '').strip()
             new_phone_number = request.form.get('phone_number', '').strip()
-            new_greenhouse_id_str = request.form.get('greenhouse_id')
+            employee_to_edit.phone_number = new_phone_number if new_phone_number else None
             employee_to_edit.available = 'available' in request.form
-            if g.employee.is_admin:
-                 employee_to_edit.is_admin = 'is_admin' in request.form
 
+            # --- Handle Admin Status (only if current user is admin AND not editing self) ---
+            if g.employee.is_admin:
+                if g.employee.id != employee_to_edit.id:
+                    employee_to_edit.is_admin = 'is_admin' in request.form
+
+            # --- Basic Validation ---
             if not employee_to_edit.name or not new_email:
                  flash("Name and email cannot be empty.", "warning")
-                 return render_template('edit_employee.html', employee=employee_to_edit, greenhouses=greenhouses)
+                 assigned_gh_ids = {gh.id for gh in employee_to_edit.greenhouses}
+                 return render_template('edit_employee.html',
+                                        employee=employee_to_edit,
+                                        greenhouses=greenhouses,
+                                        assigned_gh_ids=assigned_gh_ids,
+                                        current_user_is_admin=g.employee.is_admin)
 
             if new_email != employee_to_edit.email:
                  existing_user = Employee.query.filter(Employee.email == new_email, Employee.id != employee_to_edit.id).first()
                  if existing_user:
                      flash("Another employee is already using that email address.", "error")
-                     return render_template('edit_employee.html', employee=employee_to_edit, greenhouses=greenhouses)
+                     assigned_gh_ids = {gh.id for gh in employee_to_edit.greenhouses}
+                     return render_template('edit_employee.html',
+                                            employee=employee_to_edit,
+                                            greenhouses=greenhouses,
+                                            assigned_gh_ids=assigned_gh_ids,
+                                            current_user_is_admin=g.employee.is_admin)
                  employee_to_edit.email = new_email
 
-            new_greenhouse_id = None
-            if new_greenhouse_id_str and new_greenhouse_id_str != 'None':
+            selected_gh_ids = request.form.getlist('greenhouse_ids')
+            selected_greenhouses = []
+
+            if selected_gh_ids:
                 try:
-                    new_greenhouse_id = int(new_greenhouse_id_str)
-                    if not Greenhouse.query.get(new_greenhouse_id):
-                         raise ValueError("Invalid greenhouse selected.")
-                except ValueError as ve:
-                     flash(str(ve), "error")
-                     return render_template('edit_employee.html', employee=employee_to_edit, greenhouses=greenhouses)
-            employee_to_edit.greenhouse_id = new_greenhouse_id
+                    int_ids = [int(id_str) for id_str in selected_gh_ids if id_str.isdigit()]
+                    if int_ids:
+                        selected_greenhouses = Greenhouse.query.filter(Greenhouse.id.in_(int_ids)).all()
 
+                        if len(selected_greenhouses) != len(int_ids):
+                            found_ids = {gh.id for gh in selected_greenhouses}
+                            missing_ids = [i for i in int_ids if i not in found_ids]
+                            app.logger.warning(f"Edit Employee {employee_id}: Submitted GH IDs {int_ids}, but only found {found_ids}. Missing: {missing_ids}")
 
+                except ValueError:
+                    flash("Invalid format submitted for greenhouse IDs.", "error")
+                    assigned_gh_ids = {gh.id for gh in employee_to_edit.greenhouses}
+                    return render_template('edit_employee.html',
+                                           employee=employee_to_edit,
+                                           greenhouses=greenhouses,
+                                           assigned_gh_ids=assigned_gh_ids,
+                                           current_user_is_admin=g.employee.is_admin)
+
+            employee_to_edit.greenhouses = selected_greenhouses
             db.session.commit()
             flash(f"Employee '{employee_to_edit.name}' updated successfully!", "success")
             return redirect(url_for('view_employees'))
@@ -737,12 +797,22 @@ def edit_employee(employee_id):
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error editing employee {employee_id}: {e}", exc_info=True)
-            flash("An error occurred while updating the employee.", "error")
-            # Re-render edit form with potentially modified (but not saved) data on error
-            return render_template('edit_employee.html', employee=employee_to_edit, greenhouses=greenhouses)
+            flash("An unexpected error occurred while updating the employee.", "error")
+            assigned_gh_ids = {gh.id for gh in employee_to_edit.greenhouses}
+            return render_template('edit_employee.html',
+                                   employee=employee_to_edit,
+                                   greenhouses=greenhouses,
+                                   assigned_gh_ids=assigned_gh_ids,
+                                   current_user_is_admin=g.employee.is_admin)
 
+    assigned_gh_ids = {gh.id for gh in employee_to_edit.greenhouses}
 
-    return render_template('edit_employee.html', employee=employee_to_edit, greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin)
+    return render_template('edit_employee.html',
+                           employee=employee_to_edit,
+                           greenhouses=greenhouses,
+                           assigned_gh_ids=assigned_gh_ids,
+                           current_user_is_admin=g.employee.is_admin)
+
 
 
 @app.route('/change_password', methods=['POST'])
@@ -810,11 +880,10 @@ def create_admin_command():
     admin_email = "greentechAdmin@gmail.com"
     admin_pass = "1234"
 
+    # Use Employee model for query
     if Employee.query.filter_by(email=admin_email).first():
         click.echo(f"Admin user with email '{admin_email}' already exists.")
         return
-
-    default_greenhouse = Greenhouse.query.first()
 
     try:
         admin_user = Employee(
@@ -822,9 +891,9 @@ def create_admin_command():
             email=admin_email,
             company_id=generate_unique_company_id(),
             is_admin=True,
-            available=True,
-            greenhouse_id=None
+            available=True
         )
+
         admin_user.set_password(admin_pass)
         db.session.add(admin_user)
         db.session.commit()
@@ -832,6 +901,7 @@ def create_admin_command():
         click.echo("IMPORTANT: Change this password after first login!")
     except Exception as e:
         db.session.rollback()
+        app.logger.error(f"Error creating admin user: {e}", exc_info=True)
         click.echo(f"Error creating admin user: {e}")
 
 
