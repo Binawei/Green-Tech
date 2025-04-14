@@ -7,7 +7,7 @@ class Employee(db.Model):
     name = db.Column(String(100), nullable=False)
     email = db.Column(String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(String(256), nullable=False)
-    #phoneNumber=db.Column(String(50), nullable=True)
+    phone_number = db.Column(String(20), nullable=True)
     available = db.Column(Boolean, nullable=False, default=True)
     greenhouse_id = db.Column(Integer, ForeignKey('greenhouse.id'), nullable=True)
     company_id = db.Column(String(10), unique=True, nullable=False)

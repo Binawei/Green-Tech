@@ -304,12 +304,14 @@
                        Dashboard
                     </a>
                 </li>
+                {% if g.employee and g.employee.is_admin %}
                 <li>
                     <a href="{{ url_for('view_employees') }}"
                        class="{{ 'active' if active_page in ['view_employees', 'create_employee', 'edit_employee'] else '' }}">
                        Employees
                     </a>
                 </li>
+                {% endif %}
                  <li>
                     <a href="{{ url_for('view_greenhouses') }}"
                        class="{{ 'active' if active_page in ['view_greenhouses', 'create_greenhouse', 'input_form'] else '' }}">

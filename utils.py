@@ -6,22 +6,22 @@ from flask import current_app
 
 
 def check_temperature(temperature):
-    return 20 <= temperature <= 25
+    return 10 <= temperature <= 35
 
 def check_humidity(humidity):
-    return 40 <= humidity <= 60
+    return 30 <= humidity <= 90
 
 def check_co2(co2):
-    return 400 <= co2 <= 1000
+    return 200 <= co2 <= 1500
 
 def check_light_intensity(light_intensity):
-    return 1000 <= light_intensity <= 10000
+    return 25 <= light_intensity <= 30
 
 def check_soil_ph(soil_ph):
-    return 6 <= soil_ph <= 7
+    return 5.5 <= soil_ph <= 7
 
 def check_soil_moisture(soil_moisture):
-    return 30 <= soil_moisture <= 60
+    return 80 <= soil_moisture <= 100
 
 def send_email_notification(subject, recipients, body):
     """Sends an email notification using app configuration."""

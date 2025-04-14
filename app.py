@@ -201,7 +201,7 @@ def view_all_issues():
             if g.employee.assigned_greenhouse:
                 issues_query = issues_query.filter(Issue.greenhouse_id == g.employee.greenhouse_id)
             else:
-                issues = [] # Or handle appropriately if they can see unassigned?
+                issues = []
                 flash("You are not assigned to a greenhouse to view issues.", "warning")
                 return render_template('all_issues.html', issues=issues)
 
@@ -371,12 +371,12 @@ def resolve_issue(issue_id):
             issue.resolved_at = datetime.datetime.utcnow()
 
             # --- Generate Random "Normal" Values ---
-            normal_temp_value = random.uniform(20.0, 25.0)
-            normal_humidity_value = random.uniform(40.0, 60.0)
-            normal_co2_value = random.uniform(400.0, 1000.0)
-            normal_light_value = random.uniform(1000.0, 10000.0)
-            normal_ph_value = random.uniform(6.0, 7.0)
-            normal_moisture_value = random.uniform(30.0, 60.0)
+            normal_temp_value = random.uniform(10.0, 35.0)
+            normal_humidity_value = random.uniform(30.0, 90.0)
+            normal_co2_value = random.uniform(200.0, 1500.0)
+            normal_light_value = random.uniform(25.0, 30.0)
+            normal_ph_value = random.uniform(5.5, 7.0)
+            normal_moisture_value = random.uniform(80.0, 100.0)
             # -----------------------------------------
 
             # Log the randomly generated "Normal" data point
@@ -524,22 +524,24 @@ def create_employee():
        return redirect(url_for('dashboard'))
 
     greenhouses = Greenhouse.query.order_by(Greenhouse.name).all()
+    form_data = {'name': '', 'email': '', 'phone_number': ''}
+
     if request.method == 'POST':
         new_password = None
-        name = request.form.get('name')
-        email = request.form.get('email')
-
+        form_data['name'] = request.form.get('name', '').strip()
+        form_data['email'] = request.form.get('email', '').strip()
+        form_data['phone_number'] = request.form.get('phone_number', '').strip()
         try:
             greenhouse_id_str = request.form.get('greenhouse_id')
             is_admin_form = 'is_admin' in request.form
 
             # --- Validation ---
-            if not name or not email:
+            if not form_data['name'] or not form_data['email']:
                 flash("Name and email are required.", "warning")
-                return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin)
-            if Employee.query.filter_by(email=email).first():
+                return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+            if Employee.query.filter_by(email=form_data['email']).first():
                  flash("An employee with this email already exists.", "error")
-                 return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin)
+                 return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
 
             greenhouse_id = None
             if greenhouse_id_str and greenhouse_id_str.isdigit():
@@ -549,19 +551,25 @@ def create_employee():
                          greenhouse_id = potential_id
                     else:
                          flash("Selected greenhouse does not exist.", "error")
-                         return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin)
+                         return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
                 except ValueError:
                      flash("Invalid greenhouse selection.", "error")
-                     return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin)
-            elif greenhouse_id_str:
+                     return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+
+            elif not greenhouse_id_str or not greenhouse_id_str.isdigit():
                 greenhouse_id = None
 
             new_password = generate_password()
             company_id = generate_unique_company_id()
 
+            # --- Prepare phone number for database ---
+            phone_to_save = form_data['phone_number'] if form_data['phone_number'] else None
+            # ------------------------------------------
+
             new_employee = Employee(
-                name=name,
-                email=email,
+                name=form_data['name'],
+                email=form_data['email'],
+                phone_number=phone_to_save,
                 available=True,
                 greenhouse_id=greenhouse_id,
                 company_id=company_id,
@@ -573,23 +581,24 @@ def create_employee():
             db.session.commit()
             # --- End Database Operations ---
 
-            log_message = f"CREATED Employee: Name='{name}', Email='{email}', CompanyID='{company_id}', Admin={is_admin_form}"
+            log_message = f"CREATED Employee: Name='{form_data['name']}', Email='{form_data['email']}', Phone='{phone_to_save or 'N/A'}', CompanyID='{company_id}', Admin={is_admin_form}" # <-- Added Phone to log
             app.logger.info(log_message)
-            print(f"!!! DEBUG ONLY - CREATED Employee: Name='{name}', Email='{email}', CompanyID='{company_id}', TempPassword='{new_password}', Admin={is_admin_form}")
+            print(f"!!! DEBUG ONLY - CREATED Employee: Name='{form_data['name']}', Email='{form_data['email']}', Phone='{phone_to_save or 'N/A'}', CompanyID='{company_id}', TempPassword='{new_password}', Admin={is_admin_form}")
 
 
             # --- Send Welcome Email ---
             email_subject = "Welcome to GreenTech Monitoring - Your Account Details"
-            email_body = f"""Hello {name},
+            login_url = url_for('login', _external=True)
+            email_body = f"""Hello {form_data['name']},
 
             Welcome to the GreenTech Monitoring System!
             Your account has been created successfully.
             
             You can log in using the following credentials:
-            Email: {email}
+            Email: {form_data['email']}
             Temporary Password: {new_password}
             
-            Please log in at http://127.0.0.1:5000/
+            Please log in at {login_url}
             
             We strongly recommend changing this password via your profile settings after your first login for security reasons.
             
@@ -600,28 +609,30 @@ def create_employee():
             if app.config.get('MAIL_ENABLED'):
                 email_sent = send_email_notification(
                     subject=email_subject,
-                    recipients=[email],
+                    recipients=[form_data['email']],
                     body=email_body
                 )
-
                 if email_sent:
-                    flash(f"Employee '{name}' created successfully! Credentials have been emailed to {email}.", "success")
+                    flash(f"Employee '{form_data['name']}' created successfully! Credentials emailed.", "success")
                 else:
-                    flash(f"Employee '{name}' created successfully, BUT failed to send the welcome email.", "warning")
-                    flash(f"Please manually provide the password to the user: {new_password}", "info") # Show password here if email fails
+                    flash(f"Employee '{form_data['name']}' created, BUT failed to send welcome email.", "warning")
+                    flash(f"Manual Password for {form_data['email']}: {new_password}", "info")
             else:
-                 flash(f"Employee '{name}' created successfully! Email notifications are disabled.", "info")
-                 flash(f"Please manually provide the password to the user: {new_password}", "info")
+                 flash(f"Employee '{form_data['name']}' created successfully! Email notifications disabled.", "info")
+                 flash(f"Manual Password for {form_data['email']}: {new_password}", "info")
 
             return redirect(url_for('view_employees'))
 
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error creating employee: {e}", exc_info=True)
-            flash(f"An error occurred while creating the employee: {e}", "error")
-            return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin)
+            flash(f"An error occurred while creating the employee: {str(e)}", "error")
+            return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
 
-    return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin)
+    return render_template('create_employee.html', greenhouses=greenhouses, current_user_is_admin=g.employee.is_admin, **form_data)
+
+
+
 
 
 @app.route('/view_employees')
@@ -690,6 +701,7 @@ def edit_employee(employee_id):
         try:
             employee_to_edit.name = request.form.get('name')
             new_email = request.form.get('email')
+            new_phone_number = request.form.get('phone_number', '').strip()
             new_greenhouse_id_str = request.form.get('greenhouse_id')
             employee_to_edit.available = 'available' in request.form
             if g.employee.is_admin:

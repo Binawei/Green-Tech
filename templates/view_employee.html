@@ -23,9 +23,10 @@
                 <th>ID</th>
                 <th>Name</th>
                 <th>Email</th>
+                <th>Phone Number</th>
                 <th>Available</th>
-                <th>Greenhouse</th> {# Column header is fine #}
-                <th>Location</th>   {# Column header is fine #}
+                <th>Greenhouse</th>
+                <th>Location</th>
                 <th>Company ID</th>
                 <th class="actions">Actions</th>
             </tr>
@@ -36,6 +37,7 @@
                 <td>{{ employee.id }}</td>
                 <td>{{ employee.name }}</td>
                 <td>{{ employee.email }}</td>
+                <td>{{ employee.phone_number or 'N/A' }}</td>
                 <td>
                     {% if employee.available %}
                         <span class="badge badge-success">Yes</span>
@@ -180,7 +182,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         <dt>Email:</dt>
                         <dd>${data.email || 'N/A'}</dd>
-
+                        <dt>Phone:</dt>
+                        <dd>${data.phone_number || 'N/A'}</dd>
                         <dt>Company ID:</dt>
                         <dd>${data.company_id || 'N/A'}</dd>
 
