@@ -69,10 +69,12 @@ def load_logged_in_user():
     if employee_id is None:
         g.employee = None
     else:
-        g.employee = Employee.query.get(employee_id)
+        g.employee = Employee.query.options(
+            selectinload(Employee.greenhouses)
+        ).get(employee_id)
         if g.employee is None:
-             session.clear()
-             flash("Your session was invalid. Please log in again.", "error")
+            session.clear()
+            g.employee = None
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -191,7 +193,6 @@ def dashboard():
 def view_all_issues():
     """Displays a list of all issues, both ongoing and resolved."""
     try:
-
         issues_query = Issue.query.options(
             joinedload(Issue.originating_greenhouse)
         ).order_by(
@@ -200,27 +201,34 @@ def view_all_issues():
         )
 
         if not g.employee.is_admin:
-            # Non-admins only see issues for their assigned greenhouse
-            if g.employee.assigned_greenhouse:
-                issues_query = issues_query.filter(Issue.greenhouse_id == g.employee.greenhouse_id)
+            # g.employee.greenhouses should be loaded by load_logged_in_user now
+            assigned_greenhouse_ids = [gh.id for gh in g.employee.greenhouses]
+
+            if assigned_greenhouse_ids:
+                # Filter issues where the greenhouse_id is IN the list of assigned IDs
+                issues_query = issues_query.filter(Issue.greenhouse_id.in_(assigned_greenhouse_ids))
+                app.logger.debug(f"User {g.employee.id} viewing issues for GH IDs: {assigned_greenhouse_ids}")
             else:
-                issues = []
-                flash("You are not assigned to a greenhouse to view issues.", "warning")
-                return render_template('all_issues.html', issues=issues)
+                # Non-admin, assigned to ZERO greenhouses
+                flash("You are not assigned to any greenhouses to view issues.", "warning")
+                return render_template('all_issues.html', issues=[])
 
         issues = issues_query.all()
-
         return render_template('all_issues.html', issues=issues)
 
     except Exception as e:
-        if "exist" in str(e) or "relation" in str(e).lower():
+        # check for missing attribute if eager loading fails
+        if isinstance(e, AttributeError) and 'greenhouses' in str(e):
+             app.logger.error(f"AttributeError accessing employee greenhouses: {e}. Check eager loading.", exc_info=True)
+             flash("An error occurred determining your greenhouse assignments.", "error")
+             return render_template('all_issues.html', issues=[])
+        elif "exist" in str(e).lower() or "relation" in str(e).lower():
              flash("Database tables might be missing or not fully migrated. Run 'flask db upgrade'.", "error")
              return render_template('all_issues.html', issues=[])
         else:
              app.logger.error(f"View all issues error: {e}", exc_info=True)
              flash("An unexpected error occurred loading issues.", "error")
              return render_template('all_issues.html', issues=[])
-
 
 
 
@@ -236,11 +244,11 @@ def view_greenhouses():
          # Handle potential DB errors
          if "exist" in str(e) or "relation" in str(e).lower():
              flash("Database tables might be missing or not fully migrated. Run 'flask db upgrade'.", "error")
-             return render_template('view_greenhouses.html', greenhouses=[]) # Render empty list
+             return render_template('view_greenhouses.html', greenhouses=[])
          else:
              app.logger.error(f"View greenhouses error: {e}", exc_info=True)
              flash("An unexpected error occurred loading greenhouses.", "error")
-             return render_template('view_greenhouses.html', greenhouses=[]) # Render empty list
+             return render_template('view_greenhouses.html', greenhouses=[])
 
 
 
@@ -356,17 +364,23 @@ def input_form(greenhouse_id):
 @app.route('/issue/resolve/<int:issue_id>', methods=['POST'], endpoint='resolve_issue')
 @login_required
 def resolve_issue(issue_id):
+    # Eager load greenhouse info needed for permission check and logging
     issue = Issue.query.options(joinedload(Issue.originating_greenhouse)).get_or_404(issue_id)
     greenhouse_id_affected = issue.greenhouse_id
 
-    # --- Permission Check (as before) ---
     can_resolve = False
-    if g.employee.is_admin: can_resolve = True
-    elif issue.originating_greenhouse and g.employee.greenhouse_id and issue.greenhouse_id == g.employee.greenhouse_id: can_resolve = True
+    if g.employee.is_admin:
+        can_resolve = True
+    else:
+        # Check if the employee is assigned to the specific greenhouse where the issue occurred
+        assigned_gh_ids = [gh.id for gh in g.employee.greenhouses]
+        if issue.greenhouse_id in assigned_gh_ids:
+            can_resolve = True
+
     if not can_resolve:
-        flash("You do not have permission to resolve this issue.", "error")
+        flash("You do not have permission to resolve this issue (not admin or not assigned to this greenhouse).", "error")
         return redirect(request.referrer or url_for('dashboard'))
-    # --- End Permission Check ---
+    # --- End Corrected Permission Check ---
 
     if issue.status == 'Ongoing':
         try:
@@ -382,7 +396,7 @@ def resolve_issue(issue_id):
             normal_moisture_value = random.uniform(80.0, 100.0)
             # -----------------------------------------
 
-            # Log the randomly generated "Normal" data point
+            # --- Log the normal data point ---
             normal_data = EnvironmentalData(
                 greenhouse_id=greenhouse_id_affected,
                 temperature=normal_temp_value,
@@ -395,14 +409,10 @@ def resolve_issue(issue_id):
                 source='resolution'
             )
             db.session.add(normal_data)
-
-            # Log for debugging (optional)
-            app.logger.debug(f"Logged random normal data for GH {greenhouse_id_affected} upon resolving issue {issue_id}: "
-                            f"T={normal_temp_value:.1f}, H={normal_humidity_value:.1f}, CO2={normal_co2_value:.0f}, "
-                            f"L={normal_light_value:.0f}, pH={normal_ph_value:.1f}, M={normal_moisture_value:.1f}")
+            app.logger.debug(f"Logged random normal data for GH {greenhouse_id_affected} upon resolving issue {issue_id}")
 
             db.session.commit()
-            flash(f"Issue #{issue.id} marked as resolved. Representative normal environmental state logged.", "success") # Slightly modified flash
+            flash(f"Issue #{issue.id} marked as resolved. Representative normal environmental state logged.", "success")
 
         except Exception as e:
             db.session.rollback()
@@ -410,8 +420,8 @@ def resolve_issue(issue_id):
             flash("An error occurred while resolving the issue.", "error")
     else:
         flash(f"Issue #{issue.id} was already resolved.", "info")
-    return redirect(request.referrer or url_for('dashboard'))
 
+    return redirect(request.referrer or url_for('dashboard'))
 
 @app.route('/historical_data')
 @login_required
@@ -424,20 +434,29 @@ def historical_data():
         is_filtered = False
         target_greenhouse_name = None
 
-        # --- Apply Filtering Logic ---
         if not g.employee.is_admin:
-            if g.employee.greenhouse_id:
-                data_query = data_query.filter(EnvironmentalData.greenhouse_id == g.employee.greenhouse_id)
+            # Get the list of assigned greenhouse IDs
+            assigned_greenhouse_ids = [gh.id for gh in g.employee.greenhouses]
+
+            if assigned_greenhouse_ids:
+                # Filter where greenhouse_id is in the list of assigned IDs
+                data_query = data_query.filter(EnvironmentalData.greenhouse_id.in_(assigned_greenhouse_ids))
                 is_filtered = True
+                app.logger.debug(f"User {g.employee.id} viewing historical data for GH IDs: {assigned_greenhouse_ids}")
 
-                if not g.employee.assigned_greenhouse:
-                     g.employee = Employee.query.options(joinedload(Employee.assigned_greenhouse)).get(g.employee.id)
-                target_greenhouse_name = g.employee.assigned_greenhouse.name if g.employee.assigned_greenhouse else f"GH {g.employee.greenhouse_id}"
-
+                # Set title based on number of assigned greenhouses
+                if len(assigned_greenhouse_ids) == 1:
+                    # Get the name from the (already loaded) greenhouse object
+                    gh_name = g.employee.greenhouses[0].name
+                    title = f"Historical Data for {gh_name}"
+                else:
+                    title = "Historical Data for Your Assigned Greenhouses"
             else:
-                flash("You are not assigned to a greenhouse to view historical data.", "warning")
-                return render_template('historical_data.html', data=[], pagination=None, title="Historical Data", is_filtered=True, target_greenhouse_name=None)
-        # --- End Filtering Logic ---
+                # Non-admin, assigned to ZERO greenhouses
+                flash("You are not assigned to any greenhouses to view historical data.", "warning")
+                return render_template('historical_data.html', data=[], pagination=None, title="Historical Data",
+                                       is_filtered=True)
+        # --- End Corrected Filtering Logic ---
 
         # Pagination (apply after filtering)
         page = request.args.get('page', 1, type=int)
@@ -448,7 +467,7 @@ def historical_data():
         if is_filtered and target_greenhouse_name:
             title = f"Historical Data for {target_greenhouse_name}"
         elif is_filtered and not target_greenhouse_name:
-             title = "Historical Data (Filtered)"
+             title = "Historical Data"
         else: # Admin view
              title = "Historical Data (All Greenhouses)"
 

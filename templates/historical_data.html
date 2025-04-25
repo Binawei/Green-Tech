@@ -10,10 +10,7 @@
     <table class="data-table historical-data-table">
         <thead>
             <tr>
-                {# Show Greenhouse column only if NOT filtered (i.e., for Admin) #}
-                {% if not is_filtered %}
-                    <th scope="col">Greenhouse</th>
-                {% endif %}
+                <th scope="col">Greenhouse</th>
                 <th scope="col">Temp (°C)</th>
                 <th scope="col">Humidity (%)</th>
                 <th scope="col">CO2 (µmol·mol⁻¹)</th>
@@ -26,10 +23,7 @@
         <tbody>
             {% for entry in data %}
             <tr>
-                {# Show Greenhouse column only if NOT filtered #}
-                {% if not is_filtered %}
-                    <td>{{ entry.greenhouse.name if entry.greenhouse else entry.greenhouse_id }}</td>
-                {% endif %}
+                <td>{{ entry.greenhouse.name if entry.greenhouse else entry.greenhouse_id }}</td>
                 <td>{{ '%.2f'|format(entry.temperature) }}</td>
                 <td>{{ '%.1f'|format(entry.humidity) }}</td>
                 <td>{{ '%.1f'|format(entry.co2) }}</td>
@@ -43,9 +37,9 @@
 
                 <td colspan="{{ 8 if not is_filtered else 7 }}" class="no-data-row">
                     {% if is_filtered %}
-                        No manually entered environmental data found for your assigned greenhouse.
+                        No entered environmental data found for your assigned greenhouse.
                     {% else %}
-                         No manually entered environmental data found in the system.
+                         No entered environmental data found in the system.
                     {% endif %}
                 </td>
             </tr>

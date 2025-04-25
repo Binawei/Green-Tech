@@ -9,7 +9,7 @@
     <table class="data-table">
         <thead>
             <tr>
-                <th>ID</th>
+                <th>S/N</th>
                 <th>Greenhouse</th>
                 <th>Description</th>
                 <th>Status</th>
@@ -20,8 +20,8 @@
         </thead>
         <tbody>
             {% for issue in issues %}
-            <tr class="{{ 'resolved-row' if issue.status == 'Resolved' else 'ongoing-row' }}"> {# Add class for potential styling #}
-                <td>{{ issue.id }}</td>
+            <tr class="{{ 'resolved-row' if issue.status == 'Resolved' else 'ongoing-row' }}">
+                <td>{{ loop.index }}</td>
                 <td>
                     {% if issue.originating_greenhouse %}
                         {{ issue.originating_greenhouse.name }}
@@ -30,7 +30,6 @@
                         N/A
                     {% endif %}
                 </td>
-                {# Use a smaller font or tooltip for long descriptions if needed #}
                 <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ issue.description }}">
                     {{ issue.description }}
                 </td>
@@ -41,32 +40,29 @@
                          <span class="badge badge-danger">Ongoing</span>
                     {% endif %}
                 </td>
-                {# Format dates nicely #}
                 <td>{{ issue.created_at.strftime('%Y-%m-%d %H:%M') if issue.created_at else 'N/A' }}</td>
                 <td>{{ issue.resolved_at.strftime('%Y-%m-%d %H:%M') if issue.resolved_at else 'N/A' }}</td>
 
                 <td class="actions">
-                    {# Show resolve button only for 'Ongoing' issues #}
                     {% if issue.status == 'Ongoing' %}
-                        {# --- Permission Check (Same logic as resolve route) --- #}
-                        {% set can_resolve_ui = (g.employee.is_admin or (issue.originating_greenhouse and g.employee.assigned_greenhouse and issue.originating_greenhouse.id == g.employee.assigned_greenhouse.id)) %}
+                        {# 1. Check if user is admin #}
+                        {% set is_admin = g.employee.is_admin %}
+                        {# 2. Get list of assigned greenhouse IDs #}
+                        {% set assigned_gh_ids = g.employee.greenhouses|map(attribute='id')|list %}
+                        {# 3. Check if the issue's greenhouse ID is in the employee's list #}
+                        {% set can_resolve_specific = issue.originating_greenhouse and (issue.originating_greenhouse.id in assigned_gh_ids) %}
+                        {% set can_resolve_ui = is_admin or can_resolve_specific %}
+
                         {% if can_resolve_ui %}
                             <form action="{{ url_for('resolve_issue', issue_id=issue.id) }}" method="post" style="display: inline;">
                                 <button type="submit" class="btn btn-primary btn-sm" title="Mark as Resolved">
                                     Resolve
                                 </button>
-                                {# You could use an icon instead of text if preferred #}
-                                {# <button type="submit" class="btn btn-success btn-sm" title="Mark as Resolved">
-                                     <svg ... checkmark icon ... ></svg>
-                                   </button> #}
                             </form>
                         {% else %}
-                             {# Optionally show a disabled button or nothing #}
                              <span class="text-xs text-gray-400">No Action</span>
                         {% endif %}
-                        {# --- End Permission Check --- #}
                     {% else %}
-                         {# No action needed for resolved issues #}
                          <span class="text-xs text-gray-400">Resolved</span>
                     {% endif %}
                 </td>
@@ -74,7 +70,11 @@
             {% else %}
             <tr>
                 <td colspan="7" style="text-align: center;" class="p-4">
-                    No issues found in the system.
+                    {% if g.employee.is_admin %}
+                        No issues found in the system.
+                    {% else %}
+                        No issues found for your assigned greenhouse(s).
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
