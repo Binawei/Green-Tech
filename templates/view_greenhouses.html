@@ -22,7 +22,7 @@
     <table class="data-table">
         <thead>
             <tr>
-                <th>ID</th>
+                <th>S/N</th>
                 <th>Name</th>
                 <th>Location</th>
                 <th>Status</th>
@@ -33,7 +33,7 @@
         <tbody>
             {% for gh in greenhouses %}
             <tr>
-                <td>{{ gh.id }}</td>
+                <td>{{ loop.index }}</td>
                 <td>{{ gh.name }}</td>
                 <td>{{ gh.location }}</td>
                 <td>

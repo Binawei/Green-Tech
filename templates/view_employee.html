@@ -5,15 +5,12 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-4">All Employees</h2>
 
-{# Flash messages are now handled in base.html #}
-    <div class="page-header mb-4" style="display: flex; justify-content: space-between; align-items: center;">
-    {# --- Add New Employee Button --- #}
+<div class="page-header mb-4" style="display: flex; justify-content: space-between; align-items: center;">
     {% if g.employee and g.employee.is_admin %}
         <a href="{{ url_for('create_employee') }}" class="btn btn-primary">
-                         New Employee
-                    </a>
+             New Employee
+        </a>
     {% endif %}
-     {# --- End Button --- #}
 </div>
 
 <div class="table-container">
@@ -25,8 +22,8 @@
                 <th>Email</th>
                 <th>Phone Number</th>
                 <th>Available</th>
-                <th>Greenhouse</th>
-                <th>Location</th>
+                <th>Assigned Greenhouses</th> {# <-- Changed Header #}
+                {# REMOVED Location Header #}
                 <th>Company ID</th>
                 <th class="actions">Actions</th>
             </tr>
@@ -45,9 +42,17 @@
                          <span class="badge badge-danger">No</span>
                     {% endif %}
                 </td>
-                {# Use the correct backref attribute name here #}
-                <td>{{ employee.assigned_greenhouse.name if employee.assigned_greenhouse else 'N/A' }}</td>
-                <td>{{ employee.assigned_greenhouse.location if employee.assigned_greenhouse else 'N/A' }}</td>
+                {# --- UPDATED Greenhouse Display --- #}
+                <td>
+                    {% if employee.greenhouses %}
+                        {# Loop through the list of assigned greenhouses #}
+                        {% for gh in employee.greenhouses %}
+                            {{ gh.name }}{% if not loop.last %}, {% endif %} {# Add comma except for the last one #}
+                        {% endfor %}
+                    {% else %}
+                        N/A {# Display N/A if no greenhouses are assigned #}
+                    {% endif %}
+                </td>
                 <td>{{ employee.company_id }}</td>
                 <td class="actions">
                     <button type="button" class="action-button"
@@ -60,8 +65,11 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" style="text-align: center;" class="p-4">
-                    No employees found. <a href="{{ url_for('create_employee') }}">Create one?</a>
+                <td colspan="7" style="text-align: center;" class="p-4">
+                    No employees found.
+                    {% if g.employee and g.employee.is_admin %}
+                    <a href="{{ url_for('create_employee') }}">Create one?</a>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -69,7 +77,7 @@
     </table>
 </div>
 
-<!-- Action Modal Structure -->
+<!-- Action Modal Structure (Remains the same HTML structure) -->
 <div id="actionModal" class="modal" aria-labelledby="modal-title" role="dialog" aria-modal="true">
     <div class="modal-content" role="document">
         <div class="modal-header">
@@ -83,15 +91,15 @@
                 <button id="viewAction" class="btn-link">
                     View Details
                 </button>
-
+                {# Edit link is set dynamically via JS #}
                 <a id="editAction" href="#" class="btn-link">
                     Edit Details
                 </a>
             </div>
         </div>
 
+        {# --- View Details Content Area (will be updated by JS) --- #}
         <div id="view-details-content" class="modal-body" style="display: none;">
-            {/* Content loaded via JS */}
         </div>
     </div>
 </div>
@@ -99,9 +107,10 @@
 
 
 {% block scripts %}
-{# The JavaScript logic remains mostly the same, just adjust class names/styles if needed #}
+{# --- UPDATED JavaScript --- #}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+
     const modal = document.getElementById('actionModal');
     const closeModalButton = document.getElementById('closeModalButton');
     const actionButtons = document.querySelectorAll('.action-button');
@@ -112,89 +121,95 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let currentEmployeeId = null;
 
-    // --- Function to Show Modal ---
     function showModal(employeeId) {
         currentEmployeeId = employeeId;
-        // Reset view details area and hide it
         viewDetailsContent.innerHTML = '';
         viewDetailsContent.style.display = 'none';
-        // Show action buttons area
         modalActionsDiv.style.display = 'block';
-
-        // Set the href for the Edit link
         editActionButton.href = `/employee/edit/${employeeId}`;
-
-        // Show the modal using the CSS class
         modal.classList.add('is-visible');
-        // Or using style: modal.style.display = 'flex';
     }
 
-    // --- Function to Hide Modal ---
     function hideModal() {
         modal.classList.remove('is-visible');
-         // Or using style: modal.style.display = 'none';
         currentEmployeeId = null;
     }
 
-    // --- Event Listeners ---
+
     actionButtons.forEach(button => {
         button.addEventListener('click', function(event) {
             event.stopPropagation();
-            const employeeId = this.dataset.employeeId;
-            showModal(employeeId);
+            showModal(this.dataset.employeeId);
         });
     });
-
     closeModalButton.addEventListener('click', hideModal);
-
-    // Close modal if clicking the background overlay
     modal.addEventListener('click', function(event) {
-        // Check if the click was directly on the modal background itself
         if (event.target === modal) {
             hideModal();
         }
     });
+     document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.classList.contains('is-visible')) {
+            hideModal();
+        }
+    });
 
-    // --- View Action Button Click ---
+
+    // --- UPDATED View Action Button Click ---
     viewActionButton.addEventListener('click', function() {
         if (!currentEmployeeId) return;
 
-        // Hide action buttons, show loading state in view details area
         modalActionsDiv.style.display = 'none';
         viewDetailsContent.innerHTML = '<p style="text-align: center; color: #6c757d;">Loading...</p>';
-        viewDetailsContent.style.display = 'block'; // Show the view area
+        viewDetailsContent.style.display = 'block';
 
+        // Fetch from your API endpoint for employee details
         fetch(`/api/employee/${currentEmployeeId}`)
             .then(response => {
                 if (!response.ok) {
-                    // Try to get error message from JSON response if possible
                     return response.json().then(err => { throw new Error(err.error || `HTTP error! status: ${response.status}`) });
                 }
                 return response.json();
             })
             .then(data => {
+                // --- Build HTML for display, handling the 'greenhouses' list ---
+                let greenhouseHtml = 'N/A'; // Default if no greenhouses
+                // Check if data.greenhouses exists and is an array with items
+                if (data.greenhouses && Array.isArray(data.greenhouses) && data.greenhouses.length > 0) {
+                    // Create a list of greenhouse names and locations
+                    greenhouseHtml = '<ul>';
+                    data.greenhouses.forEach(gh => {
+                        greenhouseHtml += `<li>${gh.name || 'Unknown'} (${gh.location || 'N/A'})</li>`;
+                    });
+                    greenhouseHtml += '</ul>';
+                }
 
+                // Construct the full details HTML
                 let detailsHtml = `
-                    <h4 class="modal-title">Employee Details</h4> {# Re-use modal title style #}
+                    <h4 class="modal-title">Employee Details</h4>
                     <dl>
                         <dt>Name:</dt>
                         <dd>${data.name || 'N/A'}</dd>
 
                         <dt>Email:</dt>
                         <dd>${data.email || 'N/A'}</dd>
+
                         <dt>Phone:</dt>
                         <dd>${data.phone_number || 'N/A'}</dd>
+
                         <dt>Company ID:</dt>
                         <dd>${data.company_id || 'N/A'}</dd>
 
                         <dt>Available:</dt>
                         <dd>${data.available ? 'Yes' : 'No'}</dd>
 
-                        <dt>Greenhouse:</dt>
-                        <dd>${data.greenhouse ? data.greenhouse.name : 'N/A'}</dd>
+                        <dt>Administrator:</dt> {# Added Admin status display #}
+                        <dd>${data.is_admin ? 'Yes' : 'No'}</dd>
 
-                        <dt>Location:</dt>
-                        <dd>${data.greenhouse ? data.greenhouse.location : 'N/A'}</dd>
+                        <dt>Assigned Greenhouses:</dt> {# Updated label #}
+                        <dd>${greenhouseHtml}</dd> {# Insert the generated list #}
+
+                        {# Removed separate Location field as it's included above #}
                     </dl>
                 `;
                 viewDetailsContent.innerHTML = detailsHtml;
@@ -203,14 +218,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Error fetching employee details:', error);
                 viewDetailsContent.innerHTML = `<p style="text-align: center; color: #dc3545;">Could not load details. ${error.message || ''}</p>`;
             });
-    });
-
-     // Close modal on ESC key press
-    document.addEventListener('keydown', function (event) {
-        // Check if modal is visible before closing
-        if (event.key === 'Escape' && modal.classList.contains('is-visible')) {
-            hideModal();
-        }
     });
 
 });
